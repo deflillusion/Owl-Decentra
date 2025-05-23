@@ -17,6 +17,7 @@ plotly = "^6.1.1"
 hdbscan = "^0.8.40"
 umap-learn = "^0.5.7"
 pyarrow = "^20.0.0"
+python-dotenv = "^1.1.0"
 
 
 [build-system]

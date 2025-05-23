@@ -2,7 +2,6 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
-import os
 from pathlib import Path
 from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
@@ -10,9 +9,6 @@ from sklearn.cluster import KMeans
 
 import umap
 import hdbscan
-
-# Загружаем переменные окружения из .env файла
-load_dotenv()
 
 # Получаем путь к файлу относительно корня проекта
 project_root = Path(__file__).parent.parent
