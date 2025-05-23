@@ -18,6 +18,8 @@ hdbscan = "^0.8.40"
 umap-learn = "^0.5.7"
 pyarrow = "^20.0.0"
 python-dotenv = "^1.1.0"
+sqlalchemy = "^2.0.41"
+psycopg2-binary = "^2.9.10"
 
 
 [build-system]
