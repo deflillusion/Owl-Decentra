@@ -2,7 +2,8 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
-
+import os
+from pathlib import Path
 from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
 from sklearn.cluster import KMeans
@@ -10,8 +11,13 @@ from sklearn.cluster import KMeans
 import umap
 import hdbscan
 
-# === Загрузка данных ===
-df = pd.read_parquet("C:/Users/ksyus/Desktop/Education/Owl-Decentra/hackaton/data/DECENTRATHON_3.0.parquet")
+# Загружаем переменные окружения из .env файла
+load_dotenv()
+
+# Получаем путь к файлу относительно корня проекта
+project_root = Path(__file__).parent.parent
+data_file_path = project_root / "data" / "DECENTRATHON_3.0.parquet"
+df = pd.read_parquet(data_file_path)
 print("Данные загружены:", df.shape)
 
 # === Пример агрегации по картам (пользователям) ===
@@ -29,7 +35,8 @@ df_users.columns = [
 ]
 
 # === Стандартизация ===
-features = ['total_amount', 'avg_amount', 'transaction_count', 'unique_cities', 'unique_mcc', 'unique_wallets']
+features = ['total_amount', 'avg_amount', 'transaction_count',
+            'unique_cities', 'unique_mcc', 'unique_wallets']
 X = df_users[features]
 scaler = StandardScaler()
 X_scaled = scaler.fit_transform(X)
@@ -46,7 +53,8 @@ df_users['y'] = embedding[:, 1]
 
 # === График кластеров ===
 plt.figure(figsize=(10, 6))
-sns.scatterplot(data=df_users, x='x', y='y', hue='cluster', palette='Set2', s=70)
+sns.scatterplot(data=df_users, x='x', y='y',
+                hue='cluster', palette='Set2', s=70)
 plt.title("Кластеры клиентов (card_id) — UMAP + KMeans")
 plt.xlabel("UMAP-1")
 plt.ylabel("UMAP-2")
