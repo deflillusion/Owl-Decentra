@@ -413,9 +413,9 @@ def interpret_cluster(cluster_data, used_labels, cluster_id):
         elif max_category == 'style' and "Любитель ухода и моды" in available_categories:
             used_labels.append("Любитель ухода и моды")
             return "Любитель ухода и моды"
-        elif max_category == 'construction' and "Строитель" in available_categories:
-            used_labels.append("Строитель")
-            return "Строитель"
+        elif max_category == 'construction' and "Предприниматель" in available_categories:
+            used_labels.append("Предприниматель")
+            return "Предприниматель"
         elif max_category == 'book_and_sports' and "Любитель книг и спорта" in available_categories:
             used_labels.append("Любитель книг и спорта")
             return "Любитель книг и спорта"
@@ -425,6 +425,13 @@ def interpret_cluster(cluster_data, used_labels, cluster_id):
         elif max_category == 'pos' and "Покупатель в магазинах" in available_categories:
             used_labels.append("Покупатель в магазинах")
             return "Покупатель в магазинах"
+    
+    if (ratios.get('construction', 0) > category_threshold and
+        ratios.get('incoming_transfer', 0) > category_threshold and
+        ratios.get('outgoing_transfer', 0) > category_threshold and
+        unique_merchants >= 50 and "Предприниматель" in available_categories):
+        used_labels.append("Предприниматель")
+        return "Предприниматель"
 
     # Проверка на "Пользователя наличными"
     if (ratios.get('cash_withdrawal', 0) > fraud_threshold or
@@ -437,8 +444,8 @@ def interpret_cluster(cluster_data, used_labels, cluster_id):
 
     # Проверка на "Офисного работника"
     if (transaction_count <= 5000 and 
-        unique_merchants >= 100 and 
-        weekend_ratio > 0.5 and 
+        unique_merchants >= 50 and 
+        weekend_ratio > 0.2 and 
         office_hours and 
         ratios.get('salary', 0) > 0 and 
         ratios.get('tax_payment', 0) > 0 and 
