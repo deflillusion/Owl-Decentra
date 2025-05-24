@@ -1,6 +1,4 @@
-# Облегченный анализ банковских транзакций для больших данных
-# Автор: Erik (Decentra) - Оптимизированная версия для стабильной работы
-
+from calendar import c
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -26,7 +24,7 @@ print("⚡ Подход: Умная выборка + оптимизирован�
 # 1. ЗАГРУЗКА ДАННЫХ
 print("\n📊 Шаг 1: Загрузка данных...")
 
-data_path = "/kaggle/input/decentra"
+data_path = r"C:\Users\ksyus\Desktop\Education\Owl-Decentra\hackaton\data"  # Укажите путь к папке, содержащей parquet-файлы
 parquet_files = []
 
 if os.path.exists(data_path):
@@ -34,6 +32,10 @@ if os.path.exists(data_path):
         if filename.endswith('.parquet'):
             parquet_files.append(os.path.join(data_path, filename))
             print(f"  📁 Найден: {filename}")
+else:
+    print(f"❌ Папка данных не найдена: {data_path}")
+    print("🚫 Данные не загружены, завершаем анализ")
+    exit()
 
 df = None
 if parquet_files:
@@ -55,10 +57,15 @@ if parquet_files:
     except Exception as e:
         print(f"❌ Ошибка загрузки: {e}")
         df = None
+else:
+    print("❌ Не найдено ни одного parquet-файла в папке данных.")
+    print("🚫 Данные не загружены, завершаем анализ")
+    exit()
 
 if df is None:
     print("🚫 Данные не загружены, завершаем анализ")
     exit()
+
 
 # 2. БЫСТРАЯ ОЧИСТКА ДАННЫХ
 print("\n🧹 Шаг 2: Быстрая очистка данных...")
@@ -144,6 +151,7 @@ basic_features.columns = ['card_id', 'total_amount', 'avg_amount', 'std_amount',
                          'transaction_count', 'median_amount', 'first_transaction', 
                          'last_transaction', 'unique_merchants', 'unique_cities']
 
+# Временные паттерны (без изменений)
 print("  ⏰ Временные паттерны...")
 time_features = df.groupby('card_id').agg({
     'hour': 'mean',
@@ -153,19 +161,241 @@ time_features = df.groupby('card_id').agg({
 
 time_features.columns = ['card_id', 'avg_hour', 'weekend_ratio', 'preferred_day']
 
+# Категории и типы (добавляем новые признаки по категориям и типам транзакций)
 print("  🏪 Категории и типы...")
-category_features = df.groupby('card_id').agg({
-    'mcc_category': 'nunique',
-    'transaction_type': 'nunique'
-}).reset_index()
+# ТЮНИНГ: Определите MCC-коды и типы транзакций
+AUTO_MCC = [5541, 5542, 7513, 7531, 5599]  # Удалил дублирующийся '7531'
+CASH_WITHDRAWAL_TYPES = ['ATM_WITHDRAWAL']  # Типы транзакций для снятия наличных
+INCOMING_TRANSFER_TYPES = ['P2P_IN']  # Типы входящих переводов
+OUTGOING_TRANSFER_TYPES = ['P2P_OUT']  # Типы исходящих переводов
+SALARY_PAYMENT_TYPES = ['SALARY']  # Типы зарплатных платежей
+ECOM_PAYMENT_TYPES = ['ECOM']  # Типы онлайн-платежей
+POS_PAYMENT_TYPES = ['POS']  # Типы платежей в магазинах
+TRANSACTION_CURRENCY = ['KZT', 'TRY', 'CNY', 'AED', 'AMD', 'BYN', 'KGS', 'UZS', 'USD', 'GEL', 'EUR']  # Валюта транзакций
+COUNTRY_ISO = ['KAZ', 'TUR', 'CHN', 'ARE', 'ARM', 'BLR', 'KGZ', 'UZB', 'USA', 'GEO', 'ITA']  # ISO-коды стран
+TRAVEL_MCC = [7011, 4111, 4789, 3000]  # Путешествия
+REUSTORANT_MCC = [5812, 5813, 5814]  # Рестораны и кафе
+COSMETIX_MCC = [5999, 7298, 5945, 5977]  # Косметика
+FASHION_MCC = [5651, 5699, 5691]  # Мода
+PRODUCT_MCC = [5411, 5499, 5462, 5300]  # Продуктовые
+BEAUTY_SALONS_MCC = [7230]  # Салоны красоты
+CONSTRUCTION_MCC = [5311, 5310, 5122, 5712, 5200, 5211, 5722, 5732, 5734]  # Добавлены стройматериалы, техника, электроника
+COMMUNICATION_AND_INTERNET_MCC = [4814, 4900]  # Связь и интернет
+TAX_PAYMENT_MCC = [9311]  # Налоги
+DRUG_STORE_MCC = [5912]  # Аптеки
+LEGAL_SERVICES_MCC = [8111]  # Юристы
+BOOK_AND_SPORTS_MCC = [5941, 5942]  # Книги и спорттовары
+PROFESSIONAL_SERVICES_MCC = [8999, 8011]  # Прочие проф.услуги и медицина
+MISSING_MCC = [None]  # <NA>, отсутствующий MCC
 
-category_features.columns = ['card_id', 'unique_categories', 'unique_txn_types']
+# Подсчет доли транзакций E-commerce
+ecom_spending = df[df['transaction_type'].isin(ECOM_PAYMENT_TYPES)].groupby('card_id').agg({
+    'transaction_amount_kzt': 'sum',
+    'transaction_id': 'count'
+}).reset_index()
+ecom_spending.columns = ['card_id', 'ecom_spending_amount', 'ecom_transaction_count']
+
+# Подсчет доли транзакций в POS-терминалах
+pos_spending = df[df['transaction_type'].isin(POS_PAYMENT_TYPES)].groupby('card_id').agg({
+    'transaction_amount_kzt': 'sum',
+    'transaction_id': 'count'
+}).reset_index()
+pos_spending.columns = ['card_id', 'pos_spending_amount', 'pos_transaction_count']
+
+# Подсчет доли трат в автосервисах
+auto_spending = df[df['merchant_mcc'].isin(AUTO_MCC)].groupby('card_id').agg({
+    'transaction_amount_kzt': 'sum',
+    'transaction_id': 'count'
+}).reset_index()
+auto_spending.columns = ['card_id', 'auto_spending_amount', 'auto_transaction_count']
+
+salary_spending = df[df['transaction_type'].isin(SALARY_PAYMENT_TYPES)].groupby('card_id').agg({
+    'transaction_amount_kzt': 'sum',
+    'transaction_id': 'count'
+}).reset_index()
+salary_spending.columns = ['card_id', 'salary_spending_amount', 'salary_transaction_count']
+
+# Подсчет доли снятий наличных
+cash_withdrawals = df[df['transaction_type'].isin(CASH_WITHDRAWAL_TYPES)].groupby('card_id').agg({
+    'transaction_amount_kzt': 'sum',
+    'transaction_id': 'count'
+}).reset_index()
+cash_withdrawals.columns = ['card_id', 'cash_withdrawal_amount', 'cash_withdrawal_count']
+
+# Подсчет доли входящих переводов
+incoming_transfers = df[df['transaction_type'].isin(INCOMING_TRANSFER_TYPES)].groupby('card_id').agg({
+    'transaction_amount_kzt': 'sum',
+    'transaction_id': 'count'
+}).reset_index()
+incoming_transfers.columns = ['card_id', 'incoming_transfer_amount', 'incoming_transfer_count']
+
+# Подсчет доли исходящих переводов
+outcoming_transfers = df[df['transaction_type'].isin(OUTGOING_TRANSFER_TYPES)].groupby('card_id').agg({
+    'transaction_amount_kzt': 'sum',
+    'transaction_id': 'count'
+}).reset_index()
+outcoming_transfers.columns = ['card_id', 'outcoming_transfer_amount', 'outcoming_transfer_count']
+
+# Подсчет доли трат в ресторанах
+restaurant_spending = df[df['merchant_mcc'].isin(REUSTORANT_MCC)].groupby('card_id').agg({
+    'transaction_amount_kzt': 'sum',
+    'transaction_id': 'count'
+}).reset_index()
+restaurant_spending.columns = ['card_id', 'restaurant_spending_amount', 'restaurant_transaction_count']
+
+# Подсчет доли трат на косметику
+cosmetic_spending = df[df['merchant_mcc'].isin(COSMETIX_MCC)].groupby('card_id').agg({
+    'transaction_amount_kzt': 'sum',
+    'transaction_id': 'count'
+}).reset_index()
+cosmetic_spending.columns = ['card_id', 'cosmetic_spending_amount', 'cosmetic_transaction_count']
+
+# Подсчет доли трат на моду
+fashion_spending = df[df['merchant_mcc'].isin(FASHION_MCC)].groupby('card_id').agg({
+    'transaction_amount_kzt': 'sum',
+    'transaction_id': 'count'
+}).reset_index()
+fashion_spending.columns = ['card_id', 'fashion_spending_amount', 'fashion_transaction_count']
+
+# Подсчет доли трат на продукты
+product_spending = df[df['merchant_mcc'].isin(PRODUCT_MCC)].groupby('card_id').agg({
+    'transaction_amount_kzt': 'sum',
+    'transaction_id': 'count'
+}).reset_index()
+product_spending.columns = ['card_id', 'product_spending_amount', 'product_transaction_count']
+
+# Подсчет доли трат в салонах красоты
+beauty_salons_spending = df[df['merchant_mcc'].isin(BEAUTY_SALONS_MCC)].groupby('card_id').agg({
+    'transaction_amount_kzt': 'sum',
+    'transaction_id': 'count'
+}).reset_index()
+beauty_salons_spending.columns = ['card_id', 'beauty_salons_spending_amount', 'beauty_salons_transaction_count']
+
+# Подсчет доли трат на строительство
+construction_spending = df[df['merchant_mcc'].isin(CONSTRUCTION_MCC)].groupby('card_id').agg({
+    'transaction_amount_kzt': 'sum',
+    'transaction_id': 'count'
+}).reset_index()
+construction_spending.columns = ['card_id', 'construction_spending_amount', 'construction_transaction_count']
+
+# Подсчет доли трат на связь и интернет
+communication_and_internet_spending = df[df['merchant_mcc'].isin(COMMUNICATION_AND_INTERNET_MCC)].groupby('card_id').agg({
+    'transaction_amount_kzt': 'sum',
+    'transaction_id': 'count'
+}).reset_index()
+communication_and_internet_spending.columns = ['card_id', 'communication_and_internet_spending_amount', 'communication_and_internet_transaction_count']
+
+# Подсчет доли налоговых платежей
+tax_payment_spending = df[df['merchant_mcc'].isin(TAX_PAYMENT_MCC)].groupby('card_id').agg({
+    'transaction_amount_kzt': 'sum',
+    'transaction_id': 'count'
+}).reset_index()
+tax_payment_spending.columns = ['card_id', 'tax_payment_spending_amount', 'tax_payment_transaction_count']
+
+# Подсчет доли трат в аптеках
+drug_store_spending = df[df['merchant_mcc'].isin(DRUG_STORE_MCC)].groupby('card_id').agg({
+    'transaction_amount_kzt': 'sum',
+    'transaction_id': 'count'
+}).reset_index()
+drug_store_spending.columns = ['card_id', 'drug_store_spending_amount', 'drug_store_transaction_count']
+
+# Подсчет доли трат на путешествия
+travel_spending = df[df['merchant_mcc'].isin(TRAVEL_MCC)].groupby('card_id').agg({
+    'transaction_amount_kzt': 'sum',
+    'transaction_id': 'count'
+}).reset_index()
+travel_spending.columns = ['card_id', 'travel_spending_amount', 'travel_transaction_count']
+
 
 # Объединяем признаки
 client_features = basic_features.merge(time_features, on='card_id', how='left')
-client_features = client_features.merge(category_features, on='card_id', how='left')
+client_features = client_features.merge(auto_spending, on='card_id', how='left')
+client_features = client_features.merge(cash_withdrawals, on='card_id', how='left')
+client_features = client_features.merge(incoming_transfers, on='card_id', how='left')
+client_features = client_features.merge(outcoming_transfers, on='card_id', how='left')
+client_features = client_features.merge(restaurant_spending, on='card_id', how='left')
+client_features = client_features.merge(cosmetic_spending, on='card_id', how='left')
+client_features = client_features.merge(fashion_spending, on='card_id', how='left')
+client_features = client_features.merge(product_spending, on='card_id', how='left')
+client_features = client_features.merge(beauty_salons_spending, on='card_id', how='left')
+client_features = client_features.merge(construction_spending, on='card_id', how='left')
+client_features = client_features.merge(communication_and_internet_spending, on='card_id', how='left')
+client_features = client_features.merge(tax_payment_spending, on='card_id', how='left')
+client_features = client_features.merge(drug_store_spending, on='card_id', how='left')
+client_features = client_features.merge(travel_spending, on='card_id', how='left')
+client_features = client_features.merge(salary_spending, on='card_id', how='left')
+client_features = client_features.merge(ecom_spending, on='card_id', how='left')
+client_features = client_features.merge(pos_spending, on='card_id', how='left')
+foreign_txn = df.groupby('card_id')['acquirer_country_iso'].apply(lambda x: any(x != 'KAZ')).reset_index()
+foreign_txn.columns = ['card_id', 'has_foreign_txn']
+client_features = client_features.merge(foreign_txn, on='card_id', how='left')
+client_features['has_foreign_txn'] = client_features['has_foreign_txn'].fillna(False)
 
-# Вычисляемые признаки
+
+
+# Заполняем пропуски для новых признаков
+client_features[['auto_spending_amount', 'auto_transaction_count']] = client_features[['auto_spending_amount', 'auto_transaction_count']].fillna(0)
+client_features[['cash_withdrawal_amount', 'cash_withdrawal_count']] = client_features[['cash_withdrawal_amount', 'cash_withdrawal_count']].fillna(0)
+client_features[['incoming_transfer_amount', 'incoming_transfer_count']] = client_features[['incoming_transfer_amount', 'incoming_transfer_count']].fillna(0)
+client_features[['outcoming_transfer_amount', 'outcoming_transfer_count']] = client_features[['outcoming_transfer_amount', 'outcoming_transfer_count']].fillna(0)
+client_features[['restaurant_spending_amount', 'restaurant_transaction_count']] = client_features[['restaurant_spending_amount', 'restaurant_transaction_count']].fillna(0)
+client_features[['cosmetic_spending_amount', 'cosmetic_transaction_count']] = client_features[['cosmetic_spending_amount', 'cosmetic_transaction_count']].fillna(0)
+client_features[['fashion_spending_amount', 'fashion_transaction_count']] = client_features[['fashion_spending_amount', 'fashion_transaction_count']].fillna(0)
+client_features[['product_spending_amount', 'product_transaction_count']] = client_features[['product_spending_amount', 'product_transaction_count']].fillna(0)
+client_features[['beauty_salons_spending_amount', 'beauty_salons_transaction_count']] = client_features[['beauty_salons_spending_amount', 'beauty_salons_transaction_count']].fillna(0)
+client_features[['construction_spending_amount', 'construction_transaction_count']] = client_features[['construction_spending_amount', 'construction_transaction_count']].fillna(0)
+client_features[['communication_and_internet_spending_amount', 'communication_and_internet_transaction_count']] = client_features[['communication_and_internet_spending_amount', 'communication_and_internet_transaction_count']].fillna(0)
+client_features[['tax_payment_spending_amount', 'tax_payment_transaction_count']] = client_features[['tax_payment_spending_amount', 'tax_payment_transaction_count']].fillna(0)
+client_features[['drug_store_spending_amount', 'drug_store_transaction_count']] = client_features[['drug_store_spending_amount', 'drug_store_transaction_count']].fillna(0)
+client_features[['travel_spending_amount', 'travel_transaction_count']] = client_features[['travel_spending_amount', 'travel_transaction_count']].fillna(0)
+client_features[['salary_spending_amount', 'salary_transaction_count']] = client_features[['salary_spending_amount', 'salary_transaction_count']].fillna(0)
+client_features[['ecom_spending_amount', 'ecom_transaction_count']] = client_features[['ecom_spending_amount', 'ecom_transaction_count']].fillna(0)
+client_features[['pos_spending_amount', 'pos_transaction_count']] = client_features[['pos_spending_amount', 'pos_transaction_count']].fillna(0)
+
+# Вычисляем доли от общей суммы и количества транзакций
+client_features['auto_spending_ratio'] = client_features['auto_spending_amount'] / client_features['total_amount']
+client_features['cash_withdrawal_ratio'] = client_features['cash_withdrawal_amount'] / client_features['total_amount']
+client_features['incoming_transfer_ratio'] = client_features['incoming_transfer_amount'] / client_features['total_amount']
+client_features['auto_transaction_ratio'] = client_features['auto_transaction_count'] / client_features['transaction_count']
+client_features['cash_withdrawal_transaction_ratio'] = client_features['cash_withdrawal_count'] / client_features['transaction_count']
+client_features['incoming_transfer_transaction_ratio'] = client_features['incoming_transfer_count'] / client_features['transaction_count']
+client_features['outcoming_transfer_ratio'] = client_features['outcoming_transfer_amount'] / client_features['total_amount']
+client_features['restaurant_spending_ratio'] = client_features['restaurant_spending_amount'] / client_features['total_amount']
+client_features['cosmetic_spending_ratio'] = client_features['cosmetic_spending_amount'] / client_features['total_amount']
+client_features['fashion_spending_ratio'] = client_features['fashion_spending_amount'] / client_features['total_amount']
+client_features['product_spending_ratio'] = client_features['product_spending_amount'] / client_features['total_amount']
+client_features['beauty_salons_spending_ratio'] = client_features['beauty_salons_spending_amount'] / client_features['total_amount']
+client_features['construction_spending_ratio'] = client_features['construction_spending_amount'] / client_features['total_amount']
+client_features['communication_and_internet_spending_ratio'] = client_features['communication_and_internet_spending_amount'] / client_features['total_amount']
+client_features['tax_payment_spending_ratio'] = client_features['tax_payment_spending_amount'] / client_features['total_amount']
+client_features['drug_store_spending_ratio'] = client_features['drug_store_spending_amount'] / client_features['total_amount']
+client_features['travel_spending_ratio'] = client_features['travel_spending_amount'] / client_features['total_amount']
+client_features['salary_spending_ratio'] = client_features['salary_spending_amount'] / client_features['total_amount']
+client_features['ecom_spending_ratio'] = client_features['ecom_spending_amount'] / client_features['total_amount']
+client_features['pos_spending_ratio'] = client_features['pos_spending_amount'] / client_features['total_amount']
+
+# ТЮНИНГ: Можете добавить другие категории (например, супермаркеты, путешествия) аналогичным образом
+# Например:
+# SUPERMARKET_MCC = ['5411']  # MCC для супермаркетов
+# supermarket_spending = df[df['mcc_category'].isin(SUPERMARKET_MCC)].groupby('card_id').agg(...)
+
+# Заполняем пропуски и обрабатываем бесконечности
+client_features = client_features.fillna(0)
+client_features[['auto_spending_ratio', 'cash_withdrawal_ratio', 'incoming_transfer_ratio', 
+                 'auto_transaction_ratio', 'cash_withdrawal_transaction_ratio', 
+                 'incoming_transfer_transaction_ratio', 'outcoming_transfer_ratio',
+                 'restaurant_spending_ratio', 'cosmetic_spending_ratio',
+                 'fashion_spending_ratio', 'product_spending_ratio', 'beauty_salons_spending_ratio',
+                 'construction_spending_ratio', 'communication_and_internet_spending_ratio',
+                 'tax_payment_spending_ratio', 'drug_store_spending_ratio', 'travel_spending_ratio', 'pos_spending_ratio']] = client_features[['auto_spending_ratio', 'cash_withdrawal_ratio', 'incoming_transfer_ratio', 
+                 'auto_transaction_ratio', 'cash_withdrawal_transaction_ratio', 
+                 'incoming_transfer_transaction_ratio', 'outcoming_transfer_ratio',
+                 'restaurant_spending_ratio', 'cosmetic_spending_ratio',
+                 'fashion_spending_ratio', 'product_spending_ratio', 'beauty_salons_spending_ratio',
+                 'construction_spending_ratio', 'communication_and_internet_spending_ratio',
+                 'tax_payment_spending_ratio', 'drug_store_spending_ratio', 'travel_spending_ratio', 'pos_spending_ratio']].replace([np.inf, -np.inf], 0)
+
+# Вычисляемые признаки (без изменений)
 client_features['activity_days'] = (client_features['last_transaction'] - 
                                    client_features['first_transaction']).dt.days + 1
 client_features['avg_daily_transactions'] = client_features['transaction_count'] / client_features['activity_days']
@@ -194,11 +424,18 @@ print(f"✅ Создано {len(client_features.columns)-1} признаков �
 # 5. ПОДГОТОВКА К КЛАСТЕРИЗАЦИИ
 print("\n⚙️ Шаг 5: Подготовка к кластеризации...")
 
-# Выбираем только самые важные признаки
+# ТЮНИНГ: Выберите, какие признаки включить в кластеризацию
 key_features = [
     'total_amount', 'avg_amount', 'transaction_count', 'activity_days',
     'unique_merchants', 'unique_cities', 'weekend_ratio', 'avg_hour',
-    'unique_categories', 'coefficient_variation', 'avg_daily_transactions'
+    'auto_spending_ratio', 'cash_withdrawal_ratio', 'incoming_transfer_ratio', 
+    'auto_transaction_ratio', 'cash_withdrawal_transaction_ratio', 
+    'incoming_transfer_transaction_ratio', 'outcoming_transfer_ratio',
+    'restaurant_spending_ratio', 'cosmetic_spending_ratio',
+    'fashion_spending_ratio', 'product_spending_ratio', 'beauty_salons_spending_ratio',
+    'construction_spending_ratio', 'communication_and_internet_spending_ratio',
+    'tax_payment_spending_ratio', 'drug_store_spending_ratio', 'travel_spending_ratio',
+    'salary_spending_ratio', 'ecom_spending_ratio', 'pos_spending_ratio'
 ]
 
 print(f"Используем {len(key_features)} ключевых признаков")
@@ -217,7 +454,7 @@ for col in X.columns:
     Q99 = float(X[col].quantile(0.99))
     Q01 = float(X[col].quantile(0.01))
     
-    # Безопасная замена выбросов
+    # ТЮНИНГ: Настройте пороги выбросов, если нужно
     X.loc[X[col] > Q99, col] = Q99
     X.loc[X[col] < Q01, col] = Q01
 
@@ -304,28 +541,118 @@ for cluster_id, count in cluster_distribution.items():
     percentage = count / len(client_features) * 100
     print(f"  Кластер {cluster_id}: {count:,} клиентов ({percentage:.1f}%)")
 
-# Профили кластеров (только ключевые метрики)
+# Профили кластеров
 print(f"\n💡 Профили кластеров:")
 
 key_profile_features = ['total_amount', 'avg_amount', 'transaction_count', 
-                       'unique_merchants', 'weekend_ratio', 'avg_hour']
+                       'unique_merchants', 'weekend_ratio', 'avg_hour',
+                       'auto_spending_ratio', 'cash_withdrawal_ratio', 'incoming_transfer_ratio', 
+                       'auto_transaction_ratio', 'cash_withdrawal_transaction_ratio', 
+                       'incoming_transfer_transaction_ratio', 'outcoming_transfer_ratio',
+                       'restaurant_spending_ratio', 'cosmetic_spending_ratio',
+                       'fashion_spending_ratio', 'product_spending_ratio', 'beauty_salons_spending_ratio',
+                       'construction_spending_ratio', 'communication_and_internet_spending_ratio',
+                       'tax_payment_spending_ratio', 'drug_store_spending_ratio', 'travel_spending_ratio',
+                       'salary_spending_ratio', 'ecom_spending_ratio', 'pos_spending_ratio']
 
+# Функция для интерпретации кластера
+def interpret_cluster(cluster_data):
+    # Извлекаем средние значения признаков
+    auto_ratio = cluster_data['auto_spending_ratio'].mean()
+    cash_ratio = cluster_data['cash_withdrawal_ratio'].mean()
+    transfer_ratio = cluster_data['incoming_transfer_ratio'].mean()
+    transaction_count = cluster_data['transaction_count'].mean()
+    unique_merchants = cluster_data['unique_merchants'].mean()
+    tax_payment_ratio = cluster_data['tax_payment_spending_ratio'].mean()
+    weekend_ratio = cluster_data['weekend_ratio'].mean()
+    avg_hour = cluster_data['avg_hour'].mean()
+    restaurant_ratio = cluster_data['restaurant_spending_ratio'].mean()
+    ecom_ratio = cluster_data['ecom_spending_ratio'].mean()
+    
+    
+    # ТЮНИНГ: Настройте пороговые значения для каждого типа клиента
+
+    # Пороги для "Люди использующие наличные"
+    cash_threshold = 0.8  # Доля снятий наличных
+    tax_threshold = 0.5  # Доля налоговых платежей
+    transfer_threshold = 0.5  # Доля входящих переводов
+    max_merchants_mo = 200  # Максимальное количество продавцов
+
+    
+    # Пороги для "Обычного клиента"
+    max_transaction_count = 5000  # Максимальное количество транзакций
+    min_merchants = 100  # Минимальное количество продавцов
+    
+    # Логика классификации
+    # Пороги для "Автовладелец"
+    auto_threshold = 0.1  # Доля трат на автосервисы
+    auto_min_transactions = 10  # Минимальное количество транзакций для "Автолюбителя"
+    # Проверка на "Автолюбителя"
+    if auto_ratio > auto_threshold and transaction_count >= auto_min_transactions:
+        return "Автолюбитель"
+    
+    # Проверка на "Мошенника"
+    elif (cash_ratio > cash_threshold or transfer_ratio > transfer_threshold) and unique_merchants < max_merchants_mo and tax_payment_ratio < tax_threshold:
+        return "Потенциальный мошенник"
+    
+    # Проверка на "Обычного клиента"
+    elif transaction_count <= max_transaction_count and unique_merchants >= min_merchants:
+        return "Обычный клиент"
+    
+    elif (weekend_ratio > 0.5 and
+        (7 <= avg_hour <= 10 or 12 <= avg_hour <= 14) and
+        restaurant_ratio > 0.05):
+        return "Офисный работник"
+    
+    elif ecom_ratio > 0.5:
+        return "Удалёнщик"
+    
+    # ТЮНИНГ: Добавьте новые категории и их критерии
+    # Например, для "Путешественника":
+    elif cluster_data['has_foreign_txn'].all():
+        return "Путешественник (Заграница)"
+    
+    # Если ни одно условие не выполнено
+    return "Неопределенный клиент"
+
+# Вывод профилей кластеров
 for cluster_id in sorted(client_features['cluster'].unique()):
     cluster_data = client_features[client_features['cluster'] == cluster_id]
     size = len(cluster_data)
     
     print(f"\n🔹 КЛАСТЕР {cluster_id} ({size:,} клиентов):")
     
-    # Топ-3 характеристики
+    # Интерпретация
+    cluster_label = interpret_cluster(cluster_data)
+    print(f"  • Тип клиента: {cluster_label}")
+    
+    # Основные характеристики
     total_avg = cluster_data['total_amount'].mean()
     txn_avg = cluster_data['transaction_count'].mean()
     merchants_avg = cluster_data['unique_merchants'].mean()
     weekend_ratio = cluster_data['weekend_ratio'].mean()
+    auto_ratio = cluster_data['auto_spending_ratio'].mean()
+    cash_ratio = cluster_data['cash_withdrawal_ratio'].mean()
+    transfer_ratio = cluster_data['incoming_transfer_ratio'].mean()
     
     print(f"  • Общая сумма: {total_avg:,.0f} тенге")
     print(f"  • Транзакций: {txn_avg:.0f}")
     print(f"  • Продавцов: {merchants_avg:.1f}")
     print(f"  • Weekend активность: {weekend_ratio:.1%}")
+    print(f"  • Доля трат на автосервисы: {auto_ratio:.1%}")
+    print(f"  • Доля снятий наличных: {cash_ratio:.1%}")
+    print(f"  • Доля входящих переводов: {transfer_ratio:.1%}")
+    print(f"  • Доля трат в ресторанах: {cluster_data['restaurant_spending_ratio'].mean():.1%}")
+    print(f"  • Доля трат на косметику: {cluster_data['cosmetic_spending_ratio'].mean():.1%}")
+    print(f"  • Доля трат на моду: {cluster_data['fashion_spending_ratio'].mean():.1%}")
+    print(f"  • Доля трат на продукты: {cluster_data['product_spending_ratio'].mean():.1%}")
+    print(f"  • Доля трат в салонах красоты: {cluster_data['beauty_salons_spending_ratio'].mean():.1%}")
+    print(f"  • Доля трат на стройматериалы, технику, электронику: {cluster_data['construction_spending_ratio'].mean():.1%}")
+    print(f"  • Доля трат на связь и интернет: {cluster_data['communication_and_internet_spending_ratio'].mean():.1%}")
+    print(f"  • Доля налоговых платежей: {cluster_data['tax_payment_spending_ratio'].mean():.1%}")
+    print(f"  • Доля трат в аптеках: {cluster_data['drug_store_spending_ratio'].mean():.1%}")
+    print(f"  • Доля трат на путешествия: {cluster_data['travel_spending_ratio'].mean():.1%}")
+    print(f"  • Зарплата: {cluster_data['salary_spending_ratio'].mean():.1%}")
 
 # 8. ПРОСТАЯ ВИЗУАЛИЗАЦИЯ
 print("\n🎨 Шаг 8: Визуализация...")
@@ -400,52 +727,21 @@ print("\n💾 Шаг 9: Сохранение результатов...")
 # Основной файл результатов
 output_columns = ['card_id', 'total_amount', 'avg_amount', 'transaction_count', 
                  'activity_days', 'unique_merchants', 'unique_cities', 
-                 'weekend_ratio', 'avg_hour', 'unique_categories', 'cluster']
+                 'weekend_ratio', 'avg_hour', 'auto_spending_ratio', 
+                 'cash_withdrawal_ratio', 'incoming_transfer_ratio', 'cluster']
 
 final_results = client_features[output_columns].copy()
+# Добавляем читаемые метки кластеров
+final_results['cluster_label'] = final_results['cluster'].apply(
+    lambda x: interpret_cluster(client_features[client_features['cluster'] == x])
+)
+
 final_results.to_csv('lightweight_client_segments.csv', index=False)
 print("✅ Результаты сохранены в 'lightweight_client_segments.csv'")
 
 # Профили кластеров
 cluster_profiles = client_features.groupby('cluster')[key_features].agg(['mean', 'median']).round(2)
+# Добавляем метку кластера в профили
+cluster_profiles['cluster_label'] = [interpret_cluster(client_features[client_features['cluster'] == i]) for i in cluster_profiles.index]
 cluster_profiles.to_csv('cluster_profiles_summary.csv')
 print("✅ Профили кластеров сохранены в 'cluster_profiles_summary.csv'")
-
-# Краткая сводка
-summary = {
-    'total_clients_analyzed': len(client_features),
-    'clusters_found': optimal_k,
-    'silhouette_score': best_silhouette,
-    'features_used': len(key_features),
-    'largest_cluster_size': max(cluster_sizes),
-    'smallest_cluster_size': min(cluster_sizes)
-}
-
-summary_df = pd.DataFrame([summary])
-summary_df.to_csv('analysis_summary.csv', index=False)
-print("✅ Сводка анализа сохранена в 'analysis_summary.csv'")
-
-print(f"\n🎉 ОБЛЕГЧЕННЫЙ АНАЛИЗ ЗАВЕРШЕН!")
-print("=" * 55)
-print(f"📊 ИТОГОВАЯ СТАТИСТИКА:")
-print(f"• Проанализировано клиентов: {len(client_features):,}")
-print(f"• Использовано признаков: {len(key_features)}")
-print(f"• Найдено кластеров: {optimal_k}")
-print(f"• Качество кластеризации: {best_silhouette:.3f}")
-print(f"• Самый большой кластер: {max(cluster_sizes):,} клиентов")
-print(f"• Самый маленький кластер: {min(cluster_sizes):,} клиентов")
-
-balance_ratio = min(cluster_sizes) / max(cluster_sizes)
-if balance_ratio > 0.1:
-    print("✅ Кластеры относительно сбалансированы")
-elif balance_ratio > 0.05:
-    print("⚠️ Есть дисбаланс в размерах кластеров")
-else:
-    print("❌ Сильный дисбаланс - один доминирующий кластер")
-
-print(f"\n📁 Созданные файлы:")
-print("• lightweight_client_segments.csv - основные результаты")
-print("• cluster_profiles_summary.csv - профили кластеров")
-print("• analysis_summary.csv - сводка анализа")
-print("\n⚡ Анализ оптимизирован для больших данных и стабильной работы!")
-print("🎯 Готово для интерпретации и бизнес-решений!")
