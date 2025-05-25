@@ -396,6 +396,8 @@ key_profile_features = ['total_amount', 'transaction_count', 'unique_merchants',
     [f'{ttype}_spending_ratio' for ttype in transaction_types.keys()]
 
 
+# Заменить эту часть кода начиная с функции interpret_cluster:
+
 def interpret_cluster(cluster_data, used_labels, cluster_id):
     """
     Определяет тип кластера на основе характеристик клиентов
@@ -539,37 +541,22 @@ def interpret_cluster(cluster_data, used_labels, cluster_id):
             return f"Кластер {cluster_id}"
 
 
-score + global_score + activity_score
-return total_priority
-
-
 # Обновленная логика применения в основном коде
 print("🎯 Определение типов кластеров...")
 
-# Получаем приоритеты для всех кластеров
-cluster_priorities = []
-for cluster_id in sorted(client_features['cluster'].unique()):
-    cluster_data = client_features[client_features['cluster'] == cluster_id]
-    priority = get_cluster_priority(cluster_data)
-    cluster_priorities.append((cluster_id, priority))
-
-# Сортируем по приоритету (от высокого к низкому)
-cluster_priorities.sort(key=lambda x: x[1], reverse=True)
-
-# Применяем классификацию к каждому кластеру
-used_labels = []  # Сбрасываем список использованных меток
+# Применяем классификацию к каждому кластеру в порядке номеров
 cluster_labels = []
 
-for cluster_id, priority in cluster_priorities:
+for cluster_id in sorted(client_features['cluster'].unique()):
     cluster_data = client_features[client_features['cluster'] == cluster_id]
-    cluster_label = interpret_cluster(cluster_data, used_labels, cluster_id)
+    cluster_label = interpret_cluster(
+        cluster_data, [], cluster_id)  # Убираем used_labels
     cluster_labels.append((cluster_id, cluster_label))
 
     # Выводим информацию о кластере
     size = len(cluster_data)
     print(f"\n🔹 КЛАСТЕР {cluster_id} ({size:,} клиентов):")
     print(f"  • Тип клиента: {cluster_label}")
-    print(f"  • Приоритет: {priority:.1f}")
 
     # Основные метрики
     total_avg = cluster_data['total_amount'].mean()
@@ -588,7 +575,7 @@ for cluster_id, priority in cluster_priorities:
     print(f"  • Weekend активность: {weekend_ratio:.1%}")
     print(f"  • Уникальных валют: {unique_currencies:.1f}")
 
-    # Категориальные траты
+    # Категориальные траты (показываем только значимые)
     for cat in categories.keys():
         ratio = cluster_data[f'{cat}_spending_ratio'].mean()
         if ratio > 0.05:  # Показываем только значимые категории
@@ -598,6 +585,12 @@ for cluster_id, priority in cluster_priorities:
         ratio = cluster_data[f'{ttype}_spending_ratio'].mean()
         if ratio > 0.1:  # Показываем только значимые типы
             print(f"  • Доля трат на {ttype}: {ratio:.1%}")
+
+# Обновляем колонку cluster_label в данных
+print("\n💾 Обновление меток кластеров...")
+cluster_label_dict = dict(cluster_labels)
+client_features['cluster_label'] = client_features['cluster'].map(
+    cluster_label_dict)
 
 # 8. ВИЗУАЛИЗАЦИЯ
 print("\n🎨 Шаг 8: Визуализация...")
