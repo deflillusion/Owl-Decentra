@@ -6,6 +6,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA
 from sklearn.metrics import silhouette_score
+from mpl_toolkits.mplot3d import Axes3D
 import warnings
 import os
 import gc
@@ -19,22 +20,24 @@ categories = {
     'beauty_salons': [7230],
     'construction': [5311, 5310, 5122, 5712, 5200, 5211, 5722, 5732, 5734],
     'book_and_sports': [5941, 5942],
-    'tax_payment': [9311],           # Налоговые платежи
-    'travel': [3000, 3010, 3050, 3500, 7011]  # Путешествия (авиабилеты, отели и т.д.)
+    'tax_payment': [9311],
+    'travel': [3000, 3010, 3050, 3500, 7011]
 }
 
-# Типы транзакций (используются, если transaction_type доступен)
 transaction_types = {
     'incoming_transfer': ['P2P_IN'],
     'outgoing_transfer': ['P2P_OUT'],
     'ecom': ['ECOM'],
     'pos': ['POS'],
-    'cash_withdrawal': ['ATM_WITHDRAWAL'],  # Банкоматы
-    'salary': ['SALARY'],                 # Зарплата (MCC условный)
+    'cash_withdrawal': ['ATM_WITHDRAWAL'],
+    'salary': ['SALARY']
 }
 
 # Порог для "Путешественника"
 min_currencies_travel = 3
+
+# Список для отслеживания использованных меток
+used_labels = []
 
 # Настройка для экономии памяти
 pd.set_option('display.precision', 2)
@@ -42,7 +45,7 @@ plt.style.use('default')
 
 print("🚀 ОБЛЕГЧЕННЫЙ АНАЛИЗ БАНКОВСКИХ ТРАНЗАКЦИЙ")
 print("=" * 55)
-print("🎯 Цель: Кластеризация клиентов по категориям (Путешественники, Автолюбители и т.д.)")
+print("🎯 Цель: Кластеризация клиентов по категориям")
 print("⚡ Подход: Умная выборка + оптимизированные признаки")
 
 # 1. ЗАГРУЗКА ДАННЫХ
@@ -142,7 +145,6 @@ print("📋 Колонки в данных:", df.columns.tolist())
 print("📋 Уникальные MCC-коды:", df['merchant_mcc'].value_counts(dropna=False).head(10))
 print("📋 Уникальные типы транзакций:", df['transaction_type'].value_counts(dropna=False).head(10))
 print("📋 Уникальные валюты:", df['transaction_currency'].value_counts(dropna=False).head(10))
-print("📋 Клиенты с >3 валютами:", len(df[df['transaction_currency'].isin(['TRY', 'CNY', 'AED', 'AMD', 'BYN', 'KGS', 'UZS', 'USD', 'GEL', 'EUR'])].groupby('card_id').filter(lambda x: x['transaction_currency'].nunique() > 3)))
 
 # Конвертация merchant_mcc в строки
 df['merchant_mcc'] = df['merchant_mcc'].astype(str)
@@ -246,29 +248,32 @@ print(f"✅ Создано {len(client_features.columns)-1} признаков �
 # 5. ПОДГОТОВКА К КЛАСТЕРИЗАЦИИ
 print("\n⚙️ Шаг 5: Подготовка к кластеризации...")
 
-# ТЮНИНГ: Добавляем unique_currencies для "Путешественника"
+# Добавляем transaction_count и total_amount в признаки
 key_features = [f'{cat}_spending_ratio' for cat in categories.keys()] + \
                [f'{ttype}_spending_ratio' for ttype in transaction_types.keys()] + \
-               ['has_foreign_txn', 'unique_currencies']
+               ['has_foreign_txn', 'unique_currencies', 'transaction_count', 'total_amount']
 print(f"Используем {len(key_features)} ключевых признаков: {key_features}")
 
-# ТЮНИНГ: Увеличиваем веса для ключевых категорий
+# Увеличиваем веса для ключевых метрик
 feature_weights = {
-    'auto_spending_ratio': 3.0,    # Для "Автолюбителей"
+    'auto_spending_ratio': 3.0,
     'cosmetic_spending_ratio': 2.0,
     'fashion_spending_ratio': 2.0,
-    'beauty_salons_spending_ratio': 2.0, # Для "Любителя ухода и моды"
-    'construction_spending_ratio': 2.5, # Для "Строителя"
-    'book_and_sports_spending_ratio': 2.0, # Для "Любителя книг и спорта"
-    'cash_withdrawal_spending_ratio': 2.5, # Для "Пользователя наличными"
+    'beauty_salons_spending_ratio': 2.0,
+    'construction_spending_ratio': 2.5,
+    'book_and_sports_spending_ratio': 2.0,
+    'tax_payment_spending_ratio': 1.5,
+    'travel_spending_ratio': 2.0,
     'incoming_transfer_spending_ratio': 2.0,
     'outgoing_transfer_spending_ratio': 2.0,
-    'ecom_spending_ratio': 2.5,    # Для "Удалёнщика"
-    'pos_spending_ratio': 2.0,     # Для "Покупателя в магазинах"
-    'salary_spending_ratio': 1.5,  # Для "Офисного работника"
-    'tax_payment_spending_ratio': 1.5,
+    'ecom_spending_ratio': 2.5,
+    'pos_spending_ratio': 2.0,
+    'cash_withdrawal_spending_ratio': 2.5,
+    'salary_spending_ratio': 1.5,
     'has_foreign_txn': 1.5,
-    'unique_currencies': 2.5,      # Для "Путешественника"
+    'unique_currencies': 2.5,
+    'transaction_count': 2.0,  # Новый вес для количества транзакций
+    'total_amount': 2.0        # Новый вес для объёма транзакций
 }
 
 X = client_features[key_features].copy()
@@ -304,8 +309,7 @@ print("\n🎯 Шаг 6: Кластеризация...")
 n_clients = len(X_scaled)
 print(f"Клиентов для кластеризации: {n_clients:,}")
 
-# ТЮНИНГ: Ограничиваем число кластеров числом категорий (9)
-K_range = range(5, 10)
+K_range = range(10, 11)  # Фиксируем 19 кластеров, как в ваших профилях
 inertias = []
 silhouette_scores = []
 
@@ -314,6 +318,10 @@ for k in K_range:
     kmeans = KMeans(n_clusters=k, random_state=42, n_init=5, max_iter=100)
     labels = kmeans.fit_predict(X_scaled)
     inertias.append(kmeans.inertia_)
+    if k == 1:
+        silhouette_scores.append(float('nan'))
+        print(" силуэт: N/A (k=1)")
+        continue
     if n_clients > 5000:
         sample_size = 3000
         sample_indices = np.random.choice(n_clients, sample_size, replace=False)
@@ -327,17 +335,13 @@ optimal_k = K_range[np.argmax(silhouette_scores)]
 best_silhouette = max(silhouette_scores)
 print(f"\n✅ Оптимальное K: {optimal_k} (силуэт: {best_silhouette:.3f})")
 
-if optimal_k > 9:
-    optimal_k = 9  # ТЮНИНГ: Ограничиваем числом категорий
-    print(f"🔧 Принудительно ограничиваем до {optimal_k} кластеров")
-
 print(f"🎯 Финальная кластеризация с K={optimal_k}...")
 final_kmeans = KMeans(n_clusters=optimal_k, random_state=42, n_init=10)
 final_labels = final_kmeans.fit_predict(X_scaled)
 client_features['cluster'] = final_labels
 print(f"✅ Кластеризация завершена: {optimal_k} кластеров")
 
-# 7. БЫСТРЫЙ АНАЛИЗ РЕЗУЛЬТАТОВ
+# 7. АНАЛИЗ РЕЗУЛЬТАТОВ
 print("\n📈 Шаг 7: Анализ кластеров...")
 
 print("📊 Распределение клиентов по кластерам:")
@@ -356,111 +360,118 @@ def interpret_cluster(cluster_data, used_labels, cluster_id):
     ratios = {cat: cluster_data[f'{cat}_spending_ratio'].mean() for cat in categories.keys()}
     ratios.update({ttype: cluster_data[f'{ttype}_spending_ratio'].mean() for ttype in transaction_types.keys()})
     transaction_count = cluster_data['transaction_count'].mean()
+    total_amount = cluster_data['total_amount'].mean() / 1_000_000  # В миллионах тенге
     unique_merchants = cluster_data['unique_merchants'].mean()
     weekend_ratio = cluster_data['weekend_ratio'].mean()
     avg_hour = cluster_data['avg_hour'].mean()
+    unique_currencies = cluster_data['unique_currencies'].mean() if 'unique_currencies' in cluster_data else 0
+    foreign_txn_ratio = cluster_data['has_foreign_txn'].mean() if 'has_foreign_txn' in cluster_data else 0
 
-    # ТЮНИНГ: Настройте пороговые значения
-    category_threshold = 0.2  # Порог для категорий по доле трат
-    fraud_threshold = 0.5    # Порог для "Пользователя наличными"
-    min_transactions = 50    # Минимальное число транзакций
-    max_merchants_fraud = 200 # Максимум продавцов для "Пользователя наличными"
-    ecom_threshold = 0.3     # Порог для "Удалёнщика"
+    # Пониженные пороговые значения для большей чувствительности
+    category_threshold = 0.1
+    fraud_threshold = 0.3
+    min_transactions = 20
+    max_merchants_fraud = 200
+    ecom_threshold = 0.2
+    style_threshold = 0.08
+    auto_threshold = 0.15
+    construction_threshold = 0.12
+    book_sports_threshold = 0.05
     office_hours = (7 <= avg_hour <= 10 or 12 <= avg_hour <= 14)
-    valid_currencies = ['TRY', 'CNY', 'AED', 'AMD', 'BYN', 'KGS', 'UZS', 'USD', 'GEL', 'EUR']
-    min_currencies_travel = 3 # Минимальное число уникальных валют для "Путешественника"
+    high_amount_threshold = 100  # Миллионов тенге
+    high_transaction_threshold = 5000
 
-    # Доступные категории (исключая уже использованные)
+    # Отладка
+    print(f"\n🔍 Кластер {cluster_id} ({len(cluster_data)} клиентов):")
+    print(f"  total_amount: {total_amount:.1f}M₸")
+    print(f"  transaction_count: {transaction_count:.0f}")
+    print(f"  unique_currencies: {unique_currencies:.1f}")
+    print(f"  construction_spending_ratio: {ratios.get('construction', 0):.3f}")
+    print(f"  style_spending_ratio: {ratios.get('cosmetic', 0) + ratios.get('fashion', 0) + ratios.get('beauty_salons', 0):.3f}")
+    print(f"  auto_spending_ratio: {ratios.get('auto', 0):.3f}")
+    print(f"  ecom_spending_ratio: {ratios.get('ecom', 0):.3f}")
+    print(f"  pos_spending_ratio: {ratios.get('pos', 0):.3f}")
+    print(f"  cash_withdrawal_spending_ratio: {ratios.get('cash_withdrawal', 0):.3f}")
+
+    # Доступные категории
     available_categories = [
-        "Путешественник", "Автолюбитель", "Любитель ухода и моды", "Строитель",
+        "Путешественник", "Автолюбитель", "Любитель ухода и моды", "Предприниматель",
         "Любитель книг и спорта", "Пользователь наличными", "Офисный работник",
         "Удалёнщик", "Покупатель в магазинах"
     ]
     available_categories = [cat for cat in available_categories if cat not in used_labels]
 
-    # Если нет доступных категорий, возвращаем "Кластер N"
     if not available_categories:
         return f"Кластер {cluster_id}"
 
-    # Проверка уникальных валют для "Путешественника"
-    unique_currencies = cluster_data['unique_currencies'].mean() if 'unique_currencies' in cluster_data else 0
-    if unique_currencies > min_currencies_travel and "Путешественник" in available_categories:
+    # 1. Путешественник: много валют, высокий объём транзакций
+    if unique_currencies >= min_currencies_travel and foreign_txn_ratio >= 0.5 and \
+       total_amount >= high_amount_threshold and "Путешественник" in available_categories:
         used_labels.append("Путешественник")
         return "Путешественник"
 
-    # Комбинированная доля для "Любитель ухода и моды"
-    style_spending_ratio = (ratios.get('cosmetic', 0) + 
-                           ratios.get('fashion', 0) + 
-                           ratios.get('beauty_salons', 0))
-
-    # Определяем максимальную категорию
-    active_categories = {
-        'auto': ratios.get('auto', 0),
-        'style': style_spending_ratio,
-        'construction': ratios.get('construction', 0),
-        'book_and_sports': ratios.get('book_and_sports', 0),
-        'ecom': ratios.get('ecom', 0),
-        'pos': ratios.get('pos', 0)
-    }
-    max_category = max(active_categories, key=active_categories.get, default='none')
-    max_ratio = active_categories.get(max_category, 0)
-
-    # Проверка категорий по максимальной доле трат
-    if max_ratio > category_threshold and transaction_count >= min_transactions:
-        if max_category == 'auto' and "Автолюбитель" in available_categories:
-            used_labels.append("Автолюбитель")
-            return "Автолюбитель"
-        elif max_category == 'style' and "Любитель ухода и моды" in available_categories:
-            used_labels.append("Любитель ухода и моды")
-            return "Любитель ухода и моды"
-        elif max_category == 'construction' and "Предприниматель" in available_categories:
-            used_labels.append("Предприниматель")
-            return "Предприниматель"
-        elif max_category == 'book_and_sports' and "Любитель книг и спорта" in available_categories:
-            used_labels.append("Любитель книг и спорта")
-            return "Любитель книг и спорта"
-        elif max_category == 'ecom' and max_ratio >= ecom_threshold and "Удалёнщик" in available_categories:
-            used_labels.append("Удалёнщик")
-            return "Удалёнщик"
-        elif max_category == 'pos' and "Покупатель в магазинах" in available_categories:
-            used_labels.append("Покупатель в магазинах")
-            return "Покупатель в магазинах"
-    
-    if (ratios.get('construction', 0) > category_threshold and
-        ratios.get('incoming_transfer', 0) > category_threshold and
-        ratios.get('outgoing_transfer', 0) > category_threshold and
-        unique_merchants >= 50 and "Предприниматель" in available_categories):
-        used_labels.append("Предприниматель")
-        return "Предприниматель"
-
-    # Проверка на "Пользователя наличными"
-    if (ratios.get('cash_withdrawal', 0) > fraud_threshold or
-        ratios.get('incoming_transfer', 0) > fraud_threshold or
-        ratios.get('outgoing_transfer', 0) > fraud_threshold) and \
-        unique_merchants < max_merchants_fraud and \
-        "Пользователь наличными" in available_categories:
+    # 2. Пользователь наличными: высокая доля cash_withdrawal, мало продавцов
+    if ratios.get('cash_withdrawal', 0) >= fraud_threshold and \
+       unique_merchants < max_merchants_fraud and \
+       "Пользователь наличными" in available_categories:
         used_labels.append("Пользователь наличными")
         return "Пользователь наличными"
 
-    # Проверка на "Офисного работника"
-    if (transaction_count <= 5000 and 
-        unique_merchants >= 50 and 
-        weekend_ratio > 0.2 and 
-        office_hours and 
-        ratios.get('salary', 0) > 0 and 
-        ratios.get('tax_payment', 0) > 0 and 
-        "Офисный работник" in available_categories):
+    # 3. Удалёнщик: высокая доля ecom, много транзакций
+    if ratios.get('ecom', 0) >= ecom_threshold and transaction_count >= high_transaction_threshold and \
+       "Удалёнщик" in available_categories:
+        used_labels.append("Удалёнщик")
+        return "Удалёнщик"
+
+    # 4. Покупатель в магазинах: высокая доля pos, высокий объём
+    if ratios.get('pos', 0) >= 0.3 and total_amount >= high_amount_threshold and \
+       "Покупатель в магазинах" in available_categories:
+        used_labels.append("Покупатель в магазинах")
+        return "Покупатель в магазинах"
+
+    # 5. Автолюбитель: высокая доля auto
+    if ratios.get('auto', 0) >= auto_threshold and transaction_count >= min_transactions and \
+       "Автолюбитель" in available_categories:
+        used_labels.append("Автолюбитель")
+        return "Автолюбитель"
+
+    # 6. Предприниматель: высокая доля construction, много продавцов
+    if ratios.get('construction', 0) >= construction_threshold and \
+       unique_merchants >= 50 and total_amount >= high_amount_threshold and \
+       "Предприниматель" in available_categories:
+        used_labels.append("Предприниматель")
+        return "Предприниматель"
+
+    # 7. Любитель ухода и моды: высокая доля стиля
+    style_spending_ratio = (ratios.get('cosmetic', 0) + ratios.get('fashion', 0) + 
+                           ratios.get('beauty_salons', 0))
+    if style_spending_ratio >= style_threshold and transaction_count >= min_transactions and \
+       "Любитель ухода и моды" in available_categories:
+        used_labels.append("Любитель ухода и моды")
+        return "Любитель ухода и моды"
+
+    # 8. Офисный работник: умеренные транзакции, офисные часы
+    if transaction_count <= 5000 and unique_merchants >= 50 and weekend_ratio >= 0.2 and \
+       office_hours and ratios.get('salary', 0) > 0 and ratios.get('tax_payment', 0) > 0 and \
+       "Офисный работник" in available_categories:
         used_labels.append("Офисный работник")
         return "Офисный работник"
 
-    # Все остальные случаи
+    # 9. Любитель книг и спорта: высокая доля book_and_sports
+    if ratios.get('book_and_sports', 0) >= book_sports_threshold and \
+       transaction_count >= min_transactions and \
+       "Любитель книг и спорта" in available_categories:
+        used_labels.append("Любитель книг и спорта")
+        return "Любитель книг и спорта"
+
     return "Обычный клиент"
 
 # Приоритизация кластеров
 cluster_priorities = []
 for cluster_id in sorted(client_features['cluster'].unique()):
     cluster_data = client_features[client_features['cluster'] == cluster_id]
-    unique_currencies = cluster_data['unique_currencies'].mean() if 'unique_currencies' in cluster_data else 0
+    unique_currencies = cluster_data['unique_currencies'].mean()
+    total_amount = cluster_data['total_amount'].mean() / 1_000_000
     ratios = {cat: cluster_data[f'{cat}_spending_ratio'].mean() for cat in categories.keys()}
     ratios.update({ttype: cluster_data[f'{ttype}_spending_ratio'].mean() for ttype in transaction_types.keys()})
     style_spending_ratio = (ratios.get('cosmetic', 0) + ratios.get('fashion', 0) + ratios.get('beauty_salons', 0))
@@ -474,17 +485,13 @@ for cluster_id in sorted(client_features['cluster'].unique()):
         'cash_withdrawal': ratios.get('cash_withdrawal', 0)
     }
     max_ratio = max(active_ratios.values(), default=0)
-    # Приоритет: unique_currencies для "Путешественника", иначе max_ratio
-    priority = unique_currencies if unique_currencies > min_currencies_travel else max_ratio
+    priority = max(unique_currencies, total_amount, max_ratio)
     cluster_priorities.append((cluster_id, priority))
 
-# Сортировка кластеров по приоритету (убывающий порядок)
+# Сортировка кластеров по приоритету
 cluster_priorities.sort(key=lambda x: x[1], reverse=True)
 
-# Список использованных названий
-used_labels = []
-
-# Применение функции к кластерам в порядке приоритета
+# Применение функции к кластерам
 for cluster_id, priority in cluster_priorities:
     cluster_data = client_features[client_features['cluster'] == cluster_id]
     size = len(cluster_data)
@@ -497,7 +504,7 @@ for cluster_id, priority in cluster_priorities:
     cities_avg = cluster_data['unique_cities'].mean()
     weekend_ratio = cluster_data['weekend_ratio'].mean()
     foreign_txn = cluster_data['has_foreign_txn'].mean()
-    unique_currencies = cluster_data['unique_currencies'].mean() if 'unique_currencies' in cluster_data else 0
+    unique_currencies = cluster_data['unique_currencies'].mean()
     print(f"  • Общая сумма: {total_avg:,.0f} тенге")
     print(f"  • Транзакций: {txn_avg:.0f}")
     print(f"  • Продавцов: {merchants_avg:.1f}")
@@ -510,44 +517,84 @@ for cluster_id, priority in cluster_priorities:
     for ttype in transaction_types.keys():
         print(f"  • Доля трат на {ttype}: {cluster_data[f'{ttype}_spending_ratio'].mean():.1%}")
 
-# 8. ПРОСТАЯ ВИЗУАЛИЗАЦИЯ
+# 8. ВИЗУАЛИЗАЦИЯ
 print("\n🎨 Шаг 8: Визуализация...")
 
-pca = PCA(n_components=2)
+# Применяем PCA с 3 компонентами
+pca = PCA(n_components=3)
 X_pca = pca.fit_transform(X_scaled)
-fig, axes = plt.subplots(2, 2, figsize=(14, 10))
-fig.suptitle(f'Анализ {optimal_k} кластеров клиентов', fontsize=14)
 
-colors = plt.cm.tab10(np.linspace(0, 1, optimal_k))
+# Получаем метки и метрики для легенды
+used_labels = []
+cluster_labels = []
+cluster_metrics = []
+for cluster_id in sorted(client_features['cluster'].unique()):
+    cluster_data = client_features[client_features['cluster'] == cluster_id]
+    label = interpret_cluster(cluster_data, used_labels, cluster_id)
+    avg_total_amount = cluster_data['total_amount'].mean() / 1_000_000
+    avg_transaction_count = cluster_data['transaction_count'].mean()
+    cluster_labels.append((cluster_id, label))
+    cluster_metrics.append((cluster_id, avg_total_amount, avg_transaction_count))
+
+# Нормализация метрик для визуализации
+total_amounts = client_features['total_amount'].values
+transaction_counts = client_features['transaction_count'].values
+amount_min, amount_max = total_amounts.min(), total_amounts.max()
+if amount_max > amount_min:
+    sizes = 10 + 90 * (total_amounts - amount_min) / (amount_max - amount_min)
+else:
+    sizes = np.full_like(total_amounts, 50.0)
+count_min, count_max = transaction_counts.min(), transaction_counts.max()
+if count_max > count_min:
+    alphas = 0.3 + 0.5 * (transaction_counts - count_min) / (count_max - count_min)
+else:
+    alphas = np.full_like(transaction_counts, 0.5)
+
+# 3D-график
+fig = plt.figure(figsize=(14, 10))
+ax = fig.add_subplot(111, projection='3d')
+colors = plt.cm.tab20(np.linspace(0, 1, optimal_k))
 for i in range(optimal_k):
     mask = final_labels == i
-    axes[0,0].scatter(X_pca[mask, 0], X_pca[mask, 1],
-                     c=[colors[i]], label=f'Кластер {i}', alpha=0.6, s=20)
-axes[0,0].set_title('Кластеры в пространстве PCA')
-axes[0,0].set_xlabel(f'PC1 ({pca.explained_variance_ratio_[0]:.1%} дисперсии)')
-axes[0,0].set_ylabel(f'PC2 ({pca.explained_variance_ratio_[1]:.1%} дисперсии)')
-axes[0,0].legend()
+    cluster_label = next((label for cid, label in cluster_labels if cid == i), f"Кластер {i}")
+    avg_amount = next((amt for cid, amt, _ in cluster_metrics if cid == i), 0)
+    avg_count = next((cnt for cid, _, cnt in cluster_metrics if cid == i), 0)
+    legend_label = f"{cluster_label} (Сумма: {avg_amount:.1f}M₸, Транз: {avg_count:.0f})"
+    ax.scatter(X_pca[mask, 0], X_pca[mask, 1], X_pca[mask, 2],
+               c=[colors[i]], label=legend_label,
+               s=sizes[mask], alpha=float(np.mean(alphas[mask])))
 
-cluster_sizes = [sum(final_labels == i) for i in range(optimal_k)]
-axes[0,1].bar(range(optimal_k), cluster_sizes, color=colors)
-axes[0,1].set_title('Размеры кластеров')
-axes[0,1].set_xlabel('Номер кластера')
-axes[0,1].set_ylabel('Количество клиентов')
-
-cluster_travel = client_features.groupby('cluster')['travel_spending_ratio'].mean()
-axes[1,0].bar(cluster_travel.index, cluster_travel.values, color=colors)
-axes[1,0].set_title('Доля трат на путешествия')
-axes[1,0].set_xlabel('Номер кластера')
-axes[1,0].set_ylabel('Средняя доля трат')
-
-cluster_auto = client_features.groupby('cluster')['auto_spending_ratio'].mean()
-axes[1,1].bar(cluster_auto.index, cluster_auto.values, color=colors)
-axes[1,1].set_title('Доля трат на автосервисы')
-axes[1,1].set_xlabel('Номер кластера')
-axes[1,1].set_ylabel('Средняя доля трат')
-
+ax.set_title('Кластеры в 3D-пространстве PCA с метриками транзакций')
+ax.set_xlabel(f'PC1 ({pca.explained_variance_ratio_[0]:.1%} дисперсии)')
+ax.set_ylabel(f'PC2 ({pca.explained_variance_ratio_[1]:.1%} дисперсии)')
+ax.set_zlabel(f'PC3 ({pca.explained_variance_ratio_[2]:.1%} дисперсии)')
+ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=8)
 plt.tight_layout()
-plt.show()
+plt.savefig('pca_3d_clusters_with_metrics.png', bbox_inches='tight', dpi=300)
+print("✅ 3D-график сохранён как 'pca_3d_clusters_with_metrics.png'")
+
+# Остальные графики
+fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+fig.suptitle(f'Анализ {optimal_k} кластеров клиентов', fontsize=14)
+cluster_sizes = [sum(final_labels == i) for i in range(optimal_k)]
+axes[0, 0].bar(range(optimal_k), cluster_sizes, color=colors)
+axes[0, 0].set_title('Размеры кластеров')
+axes[0, 0].set_xlabel('Номер кластера')
+axes[0, 0].set_ylabel('Количество клиентов')
+cluster_travel = client_features.groupby('cluster')['travel_spending_ratio'].mean()
+axes[0, 1].bar(cluster_travel.index, cluster_travel.values, color=colors)
+axes[0, 1].set_title('Доля трат на путешествия')
+axes[0, 1].set_xlabel('Номер кластера')
+axes[0, 1].set_ylabel('Средняя доля трат')
+cluster_auto = client_features.groupby('cluster')['auto_spending_ratio'].mean()
+axes[1, 0].bar(cluster_auto.index, cluster_auto.values, color=colors)
+axes[1, 0].set_title('Доля трат на автосервисы')
+axes[1, 0].set_xlabel('Номер кластера')
+axes[1, 0].set_ylabel('Средняя доля трат')
+axes[1, 1].axis('off')
+plt.tight_layout()
+plt.savefig('cluster_analysis.png', bbox_inches='tight', dpi=300)
+print("✅ Анализ кластеров сохранён как 'cluster_analysis.png'")
 
 fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
 ax1.plot(K_range, inertias, 'bo-')
@@ -555,15 +602,15 @@ ax1.set_title('Метод локтя')
 ax1.set_xlabel('Количество кластеров')
 ax1.set_ylabel('Инерция')
 ax1.grid(True)
-
 ax2.plot(K_range, silhouette_scores, 'ro-')
 ax2.set_title('Силуэт анализ')
 ax2.set_xlabel('Количество кластеров')
 ax2.set_ylabel('Силуэт коэффициент')
 ax2.axvline(x=optimal_k, color='red', linestyle='--', alpha=0.7)
 ax2.grid(True)
-
 plt.tight_layout()
+plt.savefig('elbow_silhouette.png', bbox_inches='tight', dpi=300)
+print("✅ Метод локтя и силуэт-анализ сохранены как 'elbow_silhouette.png'")
 plt.show()
 
 # 9. СОХРАНЕНИЕ РЕЗУЛЬТАТОВ
@@ -571,7 +618,8 @@ print("\n💾 Шаг 9: Сохранение результатов...")
 
 output_columns = ['card_id', 'total_amount', 'transaction_count', 'unique_merchants',
                  'unique_cities', 'weekend_ratio', 'avg_hour', 'has_foreign_txn',
-                 'cluster'] + [f'{cat}_spending_ratio' for cat in categories.keys()] + \
+                 'unique_currencies', 'cluster'] + \
+                [f'{cat}_spending_ratio' for cat in categories.keys()] + \
                 [f'{ttype}_spending_ratio' for ttype in transaction_types.keys()]
 final_results = client_features[output_columns].copy()
 final_results['cluster_label'] = final_results['cluster'].apply(
@@ -580,7 +628,11 @@ final_results['cluster_label'] = final_results['cluster'].apply(
 final_results.to_csv('client_segments.csv', index=False)
 print("✅ Результаты сохранены в 'client_segments.csv'")
 
+used_labels_profiles = []
 cluster_profiles = client_features.groupby('cluster')[key_profile_features].agg(['mean', 'median']).round(2)
-cluster_profiles['cluster_label'] = [interpret_cluster(client_features[client_features['cluster'] == i]) for i in cluster_profiles.index]
+cluster_profiles['cluster_label'] = [
+    interpret_cluster(client_features[client_features['cluster'] == i], used_labels_profiles, i)
+    for i in cluster_profiles.index
+]
 cluster_profiles.to_csv('cluster_profiles_summary.csv')
 print("✅ Профили кластеров сохранены в 'cluster_profiles_summary.csv'")
