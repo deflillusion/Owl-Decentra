@@ -382,6 +382,7 @@ def interpret_cluster(cluster_data, used_labels, cluster_id):
     high_transaction_threshold = 5000
     salary_threshold = 0.003  # Доля зарплатных трат
 
+
     # Отладка
     print(f"\n🔍 Кластер {cluster_id} ({len(cluster_data)} клиентов):")
     print(f"  total_amount: {total_amount:.1f}M₸")
@@ -395,12 +396,14 @@ def interpret_cluster(cluster_data, used_labels, cluster_id):
     print(f"  cash_withdrawal_spending_ratio: {ratios.get('cash_withdrawal', 0):.3f}")
     print(f"  salary_spending_ratio: {ratios.get('salary', 0):.3f}")
 
+
     # Доступные категории
     available_categories = [
         "Путешественник", "Автолюбитель", "Любитель ухода и моды", "Предприниматель",
         "Любитель книг и спорта", "Пользователь наличными", "Офисный работник",
         "Удалёнщик", "Покупатель в магазинах", "Пользователь физической пластиковой карты",
         "Среднеактивный пользователь"
+
     ]
     available_categories = [cat for cat in available_categories if cat not in used_labels]
 
@@ -426,6 +429,7 @@ def interpret_cluster(cluster_data, used_labels, cluster_id):
         used_labels.append("Пользователь физической пластиковой карты")
         return "Пользователь физической пластиковой карты"
 
+
     if ratios.get('salary', 0) >= 0.3 and transaction_count <= 500 and total_amount < 10_000_000 and \
         "Скромный зарплатный клиент" in available_categories:
         used_labels.append("Скромный зарплатный клиент")
@@ -441,6 +445,7 @@ def interpret_cluster(cluster_data, used_labels, cluster_id):
         "Онлайн покупатель" in available_categories:
         used_labels.append("Онлайн покупатель")
         return "Онлайн покупатель"
+
 
     # 4. Покупатель в магазинах: высокая доля pos, высокий объём
     if ratios.get('pos', 0) >= 0.3 and total_amount >= high_amount_threshold and \
@@ -503,6 +508,7 @@ for cluster_id in sorted(client_features['cluster'].unique()):
         'pos': ratios.get('pos', 0),
         'cash_withdrawal': ratios.get('cash_withdrawal', 0),
         'salary': ratios.get('salary', 0)
+
     }
     max_ratio = max(active_ratios.values(), default=0)
     priority = max(unique_currencies, total_amount, max_ratio)
@@ -653,9 +659,5 @@ cluster_profiles = client_features.groupby('cluster')[key_profile_features].agg(
 clients_count = client_features.groupby('cluster').size()
 cluster_profiles['clients_count'] = clients_count
 
-cluster_profiles['cluster_label'] = [
-    interpret_cluster(client_features[client_features['cluster'] == i], used_labels_profiles, i)
-    for i in cluster_profiles.index
-]
 cluster_profiles.to_csv('cluster_profiles_summary.csv')
 print("✅ Профили кластеров сохранены в 'cluster_profiles_summary.csv'")
