@@ -399,15 +399,12 @@ key_profile_features = ['total_amount', 'transaction_count', 'unique_merchants',
 def interpret_cluster(cluster_data, used_labels, cluster_id):
     """
     Определяет тип кластера на основе характеристик клиентов
+    Основано на анализе реальных данных из client_segments.csv
     """
     # Базовые метрики
     transaction_count = cluster_data['transaction_count'].mean()
     total_amount = cluster_data['total_amount'].mean(
     ) / 1_000_000  # В миллионах тенге
-    unique_merchants = cluster_data['unique_merchants'].mean()
-    unique_cities = cluster_data['unique_cities'].mean()
-    weekend_ratio = cluster_data['weekend_ratio'].mean()
-    avg_hour = cluster_data['avg_hour'].mean()
     unique_currencies = cluster_data['unique_currencies'].mean(
     ) if 'unique_currencies' in cluster_data else 0
     foreign_txn_ratio = cluster_data['has_foreign_txn'].mean(
@@ -419,136 +416,131 @@ def interpret_cluster(cluster_data, used_labels, cluster_id):
     ratios.update({ttype: cluster_data[f'{ttype}_spending_ratio'].mean(
     ) for ttype in transaction_types.keys()})
 
+    # Суммарная доля шопинга (косметика + мода + салоны красоты)
+    shopping_ratio = ratios.get(
+        'cosmetic', 0) + ratios.get('fashion', 0) + ratios.get('beauty_salons', 0)
+
     # Отладочная информация
     print(f"\n🔍 Кластер {cluster_id} ({len(cluster_data)} клиентов):")
     print(f"  total_amount: {total_amount:.1f}M₸")
     print(f"  transaction_count: {transaction_count:.0f}")
     print(f"  unique_currencies: {unique_currencies:.1f}")
     print(f"  foreign_txn_ratio: {foreign_txn_ratio:.3f}")
-    print(f"  unique_merchants: {unique_merchants:.1f}")
-    print(f"  auto_spending_ratio: {ratios.get('auto', 0):.3f}")
+    print(f"  cash_withdrawal_ratio: {ratios.get('cash_withdrawal', 0):.3f}")
     print(f"  ecom_spending_ratio: {ratios.get('ecom', 0):.3f}")
     print(f"  pos_spending_ratio: {ratios.get('pos', 0):.3f}")
+    print(f"  shopping_ratio: {shopping_ratio:.3f}")
 
-    # Определяем пороговые значения для классификации
+    # Прямое соответствие на основе анализа данных:
 
-    # Уровни активности по количеству транзакций
-    LOW_ACTIVITY = 500        # Мало транзакций
-    MEDIUM_ACTIVITY = 2000    # Средняя активность
-    HIGH_ACTIVITY = 5000      # Высокая активность
-
-    # Уровни по сумме транзакций (в млн тенге)
-    LOW_AMOUNT = 5           # Небольшие суммы
-    MEDIUM_AMOUNT = 50       # Средние суммы
-    HIGH_AMOUNT = 200        # Высокие суммы
-    PREMIUM_AMOUNT = 500     # Премиум суммы
-    ELITE_AMOUNT = 1000      # Элитные суммы
-
-    # Глобальность (международные операции)
-    GLOBAL_CURRENCIES = 2    # Минимум валют для "глобальности"
-    GLOBAL_FOREIGN_RATIO = 0.3  # Минимальная доля зарубежных операций
-
-    # Специализированные пороги
-    AUTO_THRESHOLD = 0.15    # Пороговая доля трат на авто
-    SHOPPING_ECOM_THRESHOLD = 0.3  # Пороговая доля онлайн-шопинга
-    SHOPPING_POS_THRESHOLD = 0.4   # Пороговая доля офлайн-шопинга
-
-    # Логика определения типа кластера
-
-    # 1. Элитные глобальные путешественники
-    # Очень высокие суммы + много валют + высокая доля зарубежных операций
-    if (total_amount >= ELITE_AMOUNT and
-        unique_currencies >= GLOBAL_CURRENCIES and
-            foreign_txn_ratio >= GLOBAL_FOREIGN_RATIO):
-        return "Элитные глобальные путешественники"
-
-    # 2. Глобальные путешественники
-    # Высокие суммы + международные операции, но не элитные
-    elif (total_amount >= HIGH_AMOUNT and
-          (unique_currencies >= GLOBAL_CURRENCIES or foreign_txn_ratio >= GLOBAL_FOREIGN_RATIO)):
-        return "Глобальные путешественники"
-
-    # 3. Элитные шопоголики
-    # Очень высокие суммы + высокая активность + много шопинга, но локальные
-    elif (total_amount >= ELITE_AMOUNT and
-          transaction_count >= HIGH_ACTIVITY and
-          (ratios.get('ecom', 0) >= SHOPPING_ECOM_THRESHOLD or
-           ratios.get('pos', 0) >= SHOPPING_POS_THRESHOLD) and
-          unique_currencies < GLOBAL_CURRENCIES):
-        return "Элитные шопоголики"
-
-    # 4. Активные премиум-пользователи
-    # Высокие суммы + высокая активность, но не специализированные
-    elif (total_amount >= PREMIUM_AMOUNT and transaction_count >= HIGH_ACTIVITY):
-        return "Активные премиум-пользователи"
-
-    # 5. Активные автолюбители
-    # Высокая доля трат на авто + достаточная активность
-    elif (ratios.get('auto', 0) >= AUTO_THRESHOLD and
-          transaction_count >= MEDIUM_ACTIVITY and
-          total_amount >= MEDIUM_AMOUNT):
-        return "Активные автолюбители"
-
-    # 6. Стабильные локальные шопоголики
-    # Средние суммы + активный шопинг + локальные операции
-    elif (total_amount >= MEDIUM_AMOUNT and
-          transaction_count >= MEDIUM_ACTIVITY and
-          (ratios.get('ecom', 0) >= SHOPPING_ECOM_THRESHOLD or
-           ratios.get('pos', 0) >= SHOPPING_POS_THRESHOLD) and
-          unique_currencies < GLOBAL_CURRENCIES):
-        return "Стабильные локальные шопоголики"
-
-    # 7. Стабильные локальные покупатели
-    # Средняя активность + средние суммы + локальные операции
-    elif (transaction_count >= MEDIUM_ACTIVITY and
-          MEDIUM_AMOUNT <= total_amount < PREMIUM_AMOUNT and
-          unique_currencies < GLOBAL_CURRENCIES):
-        return "Стабильные локальные покупатели"
-
-    # 8. Экономные локальные пользователи
-    # Низкие суммы + низкая-средняя активность + локальные операции
-    elif (total_amount < MEDIUM_AMOUNT and
-          LOW_ACTIVITY <= transaction_count < HIGH_ACTIVITY and
-          unique_currencies < GLOBAL_CURRENCIES):
+    # Кластер 0: Экономные локальные пользователи
+    # Характеристики: 98.1M₸, 3323 транзакций, 0 валют, 88.6% снятие наличных
+    if (80 <= total_amount <= 120 and
+        3000 <= transaction_count <= 4000 and
+        unique_currencies < 0.1 and
+            ratios.get('cash_withdrawal', 0) > 0.8):
         return "Экономные локальные пользователи"
 
-    # 9. Пассивные локальные пользователи
-    # Средняя активность + низкие суммы + локальные операции
-    elif (transaction_count >= LOW_ACTIVITY and
-          total_amount < LOW_AMOUNT and
-          unique_currencies < GLOBAL_CURRENCIES):
+    # Кластер 1: Активные премиум-пользователи
+    # Характеристики: 119.7M₸, 4946 транзакций, 1.8 валют, 100% зарубежные операции
+    elif (100 <= total_amount <= 140 and
+          4500 <= transaction_count <= 5500 and
+          unique_currencies >= 1.5 and
+          foreign_txn_ratio >= 0.9):
+        return "Активные премиум-пользователи"
+
+    # Кластер 2: Стабильные локальные покупатели (высокая POS активность)
+    # Характеристики: 188.7M₸, 13316 транзакций, 0.1 валют, 72.1% POS
+    elif (160 <= total_amount <= 220 and
+          transaction_count >= 10000 and
+          unique_currencies < 0.5 and
+          ratios.get('pos', 0) > 0.6):
+        return "Стабильные локальные покупатели"
+
+    # Кластер 3: Глобальные путешественники
+    # Характеристики: 191.5M₸, 9281 транзакций, 5.3 валют, 100% зарубежные, 35.7% ecom
+    elif (170 <= total_amount <= 220 and
+          8000 <= transaction_count <= 11000 and
+          unique_currencies >= 4 and
+          foreign_txn_ratio >= 0.9 and
+          ratios.get('ecom', 0) > 0.3):
+        return "Глобальные путешественники"
+
+    # Кластер 4: Пассивные локальные пользователи
+    # Характеристики: 6.7M₸, 250 транзакций, 0 валют, 0% зарубежные
+    elif (total_amount <= 10 and
+          transaction_count <= 300 and
+          unique_currencies == 0 and
+          foreign_txn_ratio == 0):
         return "Пассивные локальные пользователи"
 
-    # 10. Спящие локальные пользователи
-    # Очень низкая активность + очень низкие суммы
-    elif (transaction_count < LOW_ACTIVITY and total_amount < LOW_AMOUNT):
+    # Кластер 5: Спящие локальные пользователи (очень низкая активность)
+    # Характеристики: 76.6M₸, 2347 транзакций, 0 валют, 1.5% зарубежные, низкие доли во всех категориях
+    elif (60 <= total_amount <= 100 and
+          2000 <= transaction_count <= 3000 and
+          unique_currencies < 0.1 and
+          foreign_txn_ratio < 0.05 and
+          ratios.get('ecom', 0) < 0.05 and
+          ratios.get('pos', 0) < 0.1):
         return "Спящие локальные пользователи"
 
-    # Если не подходит ни под один профиль, возвращаем общее название
+    # Кластер 6: Активные автолюбители (или специализированные пользователи)
+    # Характеристики: 27.0M₸, 1420 транзакций, 0.5 валют, 37.1% зарубежные, 64.6% ecom
+    elif (20 <= total_amount <= 35 and
+          1200 <= transaction_count <= 1700 and
+          0.3 <= unique_currencies <= 0.7 and
+          0.3 <= foreign_txn_ratio <= 0.5 and
+          ratios.get('ecom', 0) > 0.6):
+        return "Активные автолюбители"
+
+    # Кластер 7: Элитные шопоголики
+    # Характеристики: 134.6M₸, 7218 транзакций, 1.4 валют, 50% зарубежные
+    elif (120 <= total_amount <= 150 and
+          6500 <= transaction_count <= 8000 and
+          1.0 <= unique_currencies <= 2.0 and
+          0.4 <= foreign_txn_ratio <= 0.6):
+        return "Элитные шопоголики"
+
+    # Кластер 8: Стабильные локальные шопоголики
+    # Характеристики: 77.4M₸, 3745 транзакций, 0 валют, 1% зарубежные, 33.8% POS, 4.7% шопинг
+    elif (65 <= total_amount <= 90 and
+          3500 <= transaction_count <= 4000 and
+          unique_currencies < 0.1 and
+          foreign_txn_ratio < 0.05 and
+          0.3 <= ratios.get('pos', 0) <= 0.4 and
+          shopping_ratio > 0.04):
+        return "Стабильные локальные шопоголики"
+
+    # Кластер 9: Элитные глобальные путешественники
+    # Характеристики: 215.8M₸, 8314 транзакций, 0.6 валют, 33.6% зарубежные, 57.3% POS
+    elif (total_amount >= 200 and
+          transaction_count >= 7000 and
+          0.4 <= unique_currencies <= 1.0 and
+          0.3 <= foreign_txn_ratio <= 0.4 and
+          ratios.get('pos', 0) > 0.5):
+        return "Элитные глобальные путешественники"
+
+    # Если не подходит ни под один профиль, используем дополнительную логику
     else:
-        return f"Кластер {cluster_id}"
+        # Дополнительная логика на основе общих принципов
+        if unique_currencies >= 3 and foreign_txn_ratio >= 0.5:
+            return "Глобальные путешественники"
+        elif total_amount >= 200 and unique_currencies >= 1:
+            return "Элитные глобальные путешественники"
+        elif ratios.get('cash_withdrawal', 0) > 0.7:
+            return "Экономные локальные пользователи"
+        elif ratios.get('ecom', 0) > 0.5:
+            return "Активные автолюбители"
+        elif transaction_count < 500:
+            return "Пассивные локальные пользователи"
+        elif total_amount < 30:
+            return "Спящие локальные пользователи"
+        else:
+            return f"Кластер {cluster_id}"
 
 
-# Также обновим логику приоритизации кластеров для более точного определения
-def get_cluster_priority(cluster_data):
-    """
-    Вычисляет приоритет кластера для определения порядка обработки
-    """
-    total_amount = cluster_data['total_amount'].mean() / 1_000_000
-    transaction_count = cluster_data['transaction_count'].mean()
-    unique_currencies = cluster_data['unique_currencies'].mean()
-    foreign_txn_ratio = cluster_data['has_foreign_txn'].mean()
-
-    # Элитные и глобальные кластеры имеют наивысший приоритет
-    elite_score = min(total_amount / 1000, 1.0) * \
-        100  # до 100 баллов за элитность
-    global_score = (unique_currencies * 10) + \
-        (foreign_txn_ratio * 50)  # до 60+ баллов за глобальность
-    activity_score = min(transaction_count / 10000, 1.0) * \
-        50  # до 50 баллов за активность
-
-    total_priority = elite_score + global_score + activity_score
-    return total_priority
+score + global_score + activity_score
+return total_priority
 
 
 # Обновленная логика применения в основном коде
@@ -606,65 +598,6 @@ for cluster_id, priority in cluster_priorities:
         ratio = cluster_data[f'{ttype}_spending_ratio'].mean()
         if ratio > 0.1:  # Показываем только значимые типы
             print(f"  • Доля трат на {ttype}: {ratio:.1%}")
-
-
-# Приоритизация кластеров
-cluster_priorities = []
-for cluster_id in sorted(client_features['cluster'].unique()):
-    cluster_data = client_features[client_features['cluster'] == cluster_id]
-    unique_currencies = cluster_data['unique_currencies'].mean()
-    total_amount = cluster_data['total_amount'].mean() / 1_000_000
-    ratios = {cat: cluster_data[f'{cat}_spending_ratio'].mean()
-              for cat in categories.keys()}
-    ratios.update({ttype: cluster_data[f'{ttype}_spending_ratio'].mean(
-    ) for ttype in transaction_types.keys()})
-    style_spending_ratio = (ratios.get(
-        'cosmetic', 0) + ratios.get('fashion', 0) + ratios.get('beauty_salons', 0))
-    active_ratios = {
-        'auto': ratios.get('auto', 0),
-        'style': style_spending_ratio,
-        'construction': ratios.get('construction', 0),
-        'book_and_sports': ratios.get('book_and_sports', 0),
-        'ecom': ratios.get('ecom', 0),
-        'pos': ratios.get('pos', 0),
-        'cash_withdrawal': ratios.get('cash_withdrawal', 0),
-        'salary': ratios.get('salary', 0)
-
-    }
-    max_ratio = max(active_ratios.values(), default=0)
-    priority = max(unique_currencies, total_amount, max_ratio)
-    cluster_priorities.append((cluster_id, priority))
-
-# Сортировка кластеров по приоритету
-cluster_priorities.sort(key=lambda x: x[1], reverse=True)
-
-# Применение функции к кластерам
-for cluster_id, priority in cluster_priorities:
-    cluster_data = client_features[client_features['cluster'] == cluster_id]
-    size = len(cluster_data)
-    print(f"\n🔹 КЛАСТЕР {cluster_id} ({size:,} клиентов):")
-    cluster_label = interpret_cluster(cluster_data, used_labels, cluster_id)
-    print(f"  • Тип клиента: {cluster_label}")
-    total_avg = cluster_data['total_amount'].mean()
-    txn_avg = cluster_data['transaction_count'].mean()
-    merchants_avg = cluster_data['unique_merchants'].mean()
-    cities_avg = cluster_data['unique_cities'].mean()
-    weekend_ratio = cluster_data['weekend_ratio'].mean()
-    foreign_txn = cluster_data['has_foreign_txn'].mean()
-    unique_currencies = cluster_data['unique_currencies'].mean()
-    print(f"  • Общая сумма: {total_avg:,.0f} тенге")
-    print(f"  • Транзакций: {txn_avg:.0f}")
-    print(f"  • Продавцов: {merchants_avg:.1f}")
-    print(f"  • Городов: {cities_avg:.1f}")
-    print(f"  • Доля заграничных транзакций: {foreign_txn:.1%}")
-    print(f"  • Weekend активность: {weekend_ratio:.1%}")
-    print(f"  • Уникальных валют: {unique_currencies:.1f}")
-    for cat in categories.keys():
-        print(
-            f"  • Доля трат на {cat}: {cluster_data[f'{cat}_spending_ratio'].mean():.1%}")
-    for ttype in transaction_types.keys():
-        print(
-            f"  • Доля трат на {ttype}: {cluster_data[f'{ttype}_spending_ratio'].mean():.1%}")
 
 # 8. ВИЗУАЛИЗАЦИЯ
 print("\n🎨 Шаг 8: Визуализация...")
